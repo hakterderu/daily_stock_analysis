@@ -22,7 +22,6 @@ from json_repair import repair_json
 from litellm import Router
 
 from src.agent.llm_adapter import get_thinking_extra_body
-from src.agent.skills.defaults import CORE_TRADING_SKILL_POLICY_ZH
 from src.config import (
     Config,
     extra_litellm_params,
@@ -501,11 +500,12 @@ class GeminiAnalyzer:
     # 核心模块：核心结论 + 数据透视 + 舆情情报 + 作战计划
     # ========================================
 
-    SYSTEM_PROMPT = """你是一位专注于趋势交易的{market_placeholder}投资分析师，负责生成专业的【决策仪表盘】分析报告。
+    SYSTEM_PROMPT = """你是一位{market_placeholder}投资分析师，负责生成专业的【决策仪表盘】分析报告。
 
 {guidelines_placeholder}
 
-""" + CORE_TRADING_SKILL_POLICY_ZH + """
+{default_skill_policy_section}
+{skills_section}
 
 ## 输出格式：决策仪表盘 JSON
 
@@ -571,10 +571,10 @@ class GeminiAnalyzer:
 
         "battle_plan": {
             "sniper_points": {
-                "ideal_buy": "理想买入点：XX元（在MA5附近）",
-                "secondary_buy": "次优买入点：XX元（在MA10附近）",
-                "stop_loss": "止损位：XX元（跌破MA20或X%）",
-                "take_profit": "目标位：XX元（前高/整数关口）"
+                "ideal_buy": "理想入场位：XX元（满足主要技能触发条件）",
+                "secondary_buy": "次优入场位：XX元（更保守或确认后执行）",
+                "stop_loss": "止损位：XX元（失效条件或X%风险）",
+                "take_profit": "目标位：XX元（按阻力位/风险回报比制定）"
             },
             "position_strategy": {
                 "suggested_position": "建议仓位：X成",
@@ -582,12 +582,12 @@ class GeminiAnalyzer:
                 "risk_control": "风控策略描述"
             },
             "action_checklist": [
-                "✅/⚠️/❌ 检查项1：多头排列",
-                "✅/⚠️/❌ 检查项2：乖离率合理（强势趋势可放宽）",
-                "✅/⚠️/❌ 检查项3：量能配合",
+                "✅/⚠️/❌ 检查项1：当前结构是否满足激活技能条件",
+                "✅/⚠️/❌ 检查项2：入场位置与风险回报是否合理",
+                "✅/⚠️/❌ 检查项3：量价/波动/筹码是否支持判断",
                 "✅/⚠️/❌ 检查项4：无重大利空",
-                "✅/⚠️/❌ 检查项5：筹码健康",
-                "✅/⚠️/❌ 检查项6：PE估值合理"
+                "✅/⚠️/❌ 检查项5：仓位与止损计划明确",
+                "✅/⚠️/❌ 检查项6：估值/业绩/催化与结论匹配"
             ]
         }
     },
@@ -595,7 +595,7 @@ class GeminiAnalyzer:
     "analysis_summary": "100字综合分析摘要",
     "key_points": "3-5个核心看点，逗号分隔",
     "risk_warning": "风险提示",
-    "buy_reason": "操作理由，引用交易理念",
+    "buy_reason": "操作理由，引用激活技能或风险框架",
 
     "trend_analysis": "走势形态分析",
     "short_term_outlook": "短期1-3日展望",
@@ -619,28 +619,25 @@ class GeminiAnalyzer:
 ## 评分标准
 
 ### 强烈买入（80-100分）：
-- ✅ 多头排列：MA5 > MA10 > MA20
-- ✅ 低乖离率：<2%，最佳买点
-- ✅ 缩量回调或放量突破
-- ✅ 筹码集中健康
-- ✅ 消息面有利好催化
+- ✅ 多个激活技能同时支持积极结论
+- ✅ 上行空间、触发条件与风险回报清晰
+- ✅ 关键风险已排查，仓位与止损计划明确
+- ✅ 重要数据和情报结论彼此一致
 
 ### 买入（60-79分）：
-- ✅ 多头排列或弱势多头
-- ✅ 乖离率 <5%
-- ✅ 量能正常
-- ⚪ 允许一项次要条件不满足
+- ✅ 主信号偏积极，但仍有少量待确认项
+- ✅ 允许存在可控风险或次优入场点
+- ✅ 需要在报告中明确补充观察条件
 
 ### 观望（40-59分）：
-- ⚠️ 乖离率 >5%（追高风险）
-- ⚠️ 均线缠绕趋势不明
-- ⚠️ 有风险事件
+- ⚠️ 信号分歧较大，或缺乏足够确认
+- ⚠️ 风险与机会大致均衡
+- ⚠️ 更适合等待触发条件或回避不确定性
 
 ### 卖出/减仓（0-39分）：
-- ❌ 空头排列
-- ❌ 跌破MA20
-- ❌ 放量下跌
-- ❌ 重大利空
+- ❌ 主要结论转弱，风险明显高于收益
+- ❌ 触发了止损/失效条件或重大利空
+- ❌ 现有仓位更需要保护而不是进攻
 
 ## 决策仪表盘核心原则
 
@@ -650,27 +647,86 @@ class GeminiAnalyzer:
 4. **检查清单可视化**：用 ✅⚠️❌ 明确显示每项检查结果
 5. **风险优先级**：舆情中的风险点要醒目标出"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    TEXT_SYSTEM_PROMPT = """你是一位专业的股票分析助手。
+
+- 回答必须基于用户提供的数据与上下文
+- 若信息不足，要明确指出不确定性
+- 不要编造价格、财报或新闻事实
+"""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        config: Optional[Config] = None,
+        skills: Optional[List[str]] = None,
+        skill_instructions: Optional[str] = None,
+        default_skill_policy: Optional[str] = None,
+    ):
         """Initialize LLM Analyzer via LiteLLM.
 
         Args:
             api_key: Ignored (kept for backward compatibility). Keys are loaded from config.
         """
+        self._config_override = config
+        self._requested_skills = list(skills) if skills is not None else None
+        self._skill_instructions_override = skill_instructions
+        self._default_skill_policy_override = default_skill_policy
+        self._resolved_prompt_state: Optional[Dict[str, str]] = None
         self._router = None
         self._litellm_available = False
         self._init_litellm()
         if not self._litellm_available:
             logger.warning("No LLM configured (LITELLM_MODEL / API keys), AI analysis will be unavailable")
 
+    def _get_runtime_config(self) -> Config:
+        """Return the runtime config, honoring injected overrides for tests/pipeline."""
+        return getattr(self, "_config_override", None) or get_config()
+
+    def _get_skill_prompt_sections(self) -> tuple[str, str]:
+        """Resolve skill instructions + default baseline for legacy analyzer prompts."""
+        skill_instructions = getattr(self, "_skill_instructions_override", None)
+        default_skill_policy = getattr(self, "_default_skill_policy_override", None)
+
+        if skill_instructions is not None and default_skill_policy is not None:
+            return skill_instructions, default_skill_policy
+
+        resolved_state = getattr(self, "_resolved_prompt_state", None)
+        if resolved_state is None:
+            from src.agent.factory import resolve_skill_prompt_state
+
+            prompt_state = resolve_skill_prompt_state(
+                self._get_runtime_config(),
+                skills=getattr(self, "_requested_skills", None),
+            )
+            resolved_state = {
+                "skill_instructions": prompt_state.skill_instructions,
+                "default_skill_policy": prompt_state.default_skill_policy,
+            }
+            self._resolved_prompt_state = resolved_state
+
+        return (
+            skill_instructions if skill_instructions is not None else resolved_state.get("skill_instructions", ""),
+            default_skill_policy if default_skill_policy is not None else resolved_state.get("default_skill_policy", ""),
+        )
+
     def _get_analysis_system_prompt(self, report_language: str, stock_code: str = "") -> str:
         """Build the analyzer system prompt with output-language guidance."""
         lang = normalize_report_language(report_language)
         market_role = get_market_role(stock_code, lang)
         market_guidelines = get_market_guidelines(stock_code, lang)
-        base_prompt = self.SYSTEM_PROMPT.replace(
-            "{market_placeholder}", market_role
-        ).replace(
-            "{guidelines_placeholder}", market_guidelines
+        skill_instructions, default_skill_policy = self._get_skill_prompt_sections()
+        skills_section = ""
+        if skill_instructions:
+            skills_section = f"## 激活的交易技能\n\n{skill_instructions}\n"
+        default_skill_policy_section = ""
+        if default_skill_policy:
+            default_skill_policy_section = f"{default_skill_policy}\n"
+        base_prompt = (
+            self.SYSTEM_PROMPT.replace("{market_placeholder}", market_role)
+            .replace("{guidelines_placeholder}", market_guidelines)
+            .replace("{default_skill_policy_section}", default_skill_policy_section)
+            .replace("{skills_section}", skills_section)
         )
         if lang == "en":
             return base_prompt + """
@@ -700,7 +756,7 @@ class GeminiAnalyzer:
 
     def _init_litellm(self) -> None:
         """Initialize litellm Router from channels / YAML / legacy keys."""
-        config = get_config()
+        config = self._get_runtime_config()
         litellm_model = config.litellm_model
         if not litellm_model:
             logger.warning("Analyzer LLM: LITELLM_MODEL not configured")
@@ -785,7 +841,7 @@ class GeminiAnalyzer:
             Tuple of (response text, model_used, usage). On success model_used is the full model
             name and usage is a dict with prompt_tokens, completion_tokens, total_tokens.
         """
-        config = get_config()
+        config = self._get_runtime_config()
         max_tokens = (
             generation_config.get('max_output_tokens')
             or generation_config.get('max_tokens')
@@ -799,7 +855,7 @@ class GeminiAnalyzer:
         use_channel_router = self._has_channel_config(config)
 
         last_error = None
-        effective_system_prompt = system_prompt or self.SYSTEM_PROMPT
+        effective_system_prompt = system_prompt or self.TEXT_SYSTEM_PROMPT
         for model in models_to_try:
             try:
                 model_short = model.split("/")[-1] if "/" in model else model
@@ -907,7 +963,7 @@ class GeminiAnalyzer:
             AnalysisResult 对象
         """
         code = context.get('code', 'Unknown')
-        config = get_config()
+        config = self._get_runtime_config()
         report_language = normalize_report_language(getattr(config, "report_language", "zh"))
         system_prompt = self._get_analysis_system_prompt(report_language, stock_code=code)
         
@@ -948,7 +1004,7 @@ class GeminiAnalyzer:
             # 格式化输入（包含技术面数据和新闻）
             prompt = self._format_prompt(context, name, news_context, report_language=report_language)
             
-            config = get_config()
+            config = self._get_runtime_config()
             model_name = config.litellm_model or "unknown"
             logger.info(f"========== AI 分析 {name}({code}) ==========")
             logger.info(f"[LLM配置] 模型: {model_name}")

@@ -26,6 +26,7 @@ Usage::
 
 import copy
 import logging
+from dataclasses import dataclass
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,18 @@ _SENTINEL = object()
 # Track which custom_dir the prototype was built with so we can invalidate
 # the cache if AGENT_SKILL_DIR changes at runtime (e.g. via config reload).
 _SKILL_MANAGER_CUSTOM_DIR: object = _SENTINEL
+
+
+@dataclass
+class SkillPromptState:
+    """Resolved skill activation + prompt fragments for analysis entrypoints."""
+
+    skill_manager: object
+    skills_to_activate: List[str]
+    explicit_skill_selection: bool
+    skill_instructions: str
+    default_skill_policy: str
+    technical_skill_policy: str
 
 
 def get_tool_registry():
@@ -107,6 +120,45 @@ def get_skill_manager(config=None):
     return copy.deepcopy(_SKILL_MANAGER_PROTOTYPE)
 
 
+def resolve_skill_prompt_state(config=None, skills: Optional[List[str]] = None) -> SkillPromptState:
+    """Resolve active skills and prompt fragments for analyzer / agent entrypoints."""
+    if config is None:
+        from src.config import get_config
+        config = get_config()
+
+    from src.agent.skills.defaults import (
+        get_default_active_skill_ids,
+        get_default_technical_skill_policy,
+        get_default_trading_skill_policy,
+    )
+
+    skill_manager = get_skill_manager(config)
+    configured_skills = getattr(config, "agent_skills", None) or None
+    explicit_skill_selection = bool(skills) or configured_skills is not None
+    default_skills = get_default_active_skill_ids(skill_manager.list_skills())
+
+    if skills is not None:
+        skills_to_activate = skills or default_skills
+    else:
+        skills_to_activate = configured_skills or default_skills
+
+    skill_manager.activate(skills_to_activate)
+    logger.info("[AgentFactory] Activated skills: %s", skills_to_activate)
+
+    return SkillPromptState(
+        skill_manager=skill_manager,
+        skills_to_activate=skills_to_activate,
+        explicit_skill_selection=explicit_skill_selection,
+        skill_instructions=skill_manager.get_skill_instructions(),
+        default_skill_policy=get_default_trading_skill_policy(
+            explicit_skill_selection=explicit_skill_selection,
+        ),
+        technical_skill_policy=get_default_technical_skill_policy(
+            explicit_skill_selection=explicit_skill_selection,
+        ),
+    )
+
+
 def build_agent_executor(config=None, skills: Optional[List[str]] = None):
     """Build and return a configured AgentExecutor (or future orchestrator).
 
@@ -131,32 +183,18 @@ def build_agent_executor(config=None, skills: Optional[List[str]] = None):
     arch = getattr(config, "agent_arch", "single")
 
     from src.agent.llm_adapter import LLMToolAdapter
-    from src.agent.skills.defaults import (
-        get_default_active_skill_ids,
-        get_default_technical_skill_policy,
-        get_default_trading_skill_policy,
-    )
 
     registry = get_tool_registry()
-    skill_manager = get_skill_manager(config)
-
-    configured_skills = getattr(config, "agent_skills", None) or None
-    explicit_skill_selection = bool(skills) or configured_skills is not None
-    default_skills = get_default_active_skill_ids(skill_manager.list_skills())
-    if skills is not None:
-        skills_to_activate = skills or default_skills
-    else:
-        skills_to_activate = configured_skills or default_skills
-    skill_manager.activate(skills_to_activate)
-    logger.info("[AgentFactory] Activated skills: %s (arch=%s)", skills_to_activate, arch)
+    prompt_state = resolve_skill_prompt_state(config, skills=skills)
+    skill_manager = prompt_state.skill_manager
+    logger.info(
+        "[AgentFactory] Resolved skill prompt state: skills=%s (arch=%s, explicit=%s)",
+        prompt_state.skills_to_activate,
+        arch,
+        prompt_state.explicit_skill_selection,
+    )
 
     llm_adapter = LLMToolAdapter(config)
-    default_skill_policy = get_default_trading_skill_policy(
-        explicit_skill_selection=explicit_skill_selection,
-    )
-    technical_skill_policy = get_default_technical_skill_policy(
-        explicit_skill_selection=explicit_skill_selection,
-    )
 
     if arch == "multi":
         return _build_orchestrator(
@@ -164,15 +202,15 @@ def build_agent_executor(config=None, skills: Optional[List[str]] = None):
             registry,
             llm_adapter,
             skill_manager,
-            technical_skill_policy=technical_skill_policy,
+            technical_skill_policy=prompt_state.technical_skill_policy,
         )
 
     from src.agent.executor import AgentExecutor
     return AgentExecutor(
         tool_registry=registry,
         llm_adapter=llm_adapter,
-        skill_instructions=skill_manager.get_skill_instructions(),
-        default_skill_policy=default_skill_policy,
+        skill_instructions=prompt_state.skill_instructions,
+        default_skill_policy=prompt_state.default_skill_policy,
         max_steps=getattr(config, "agent_max_steps", 10),
         timeout_seconds=getattr(config, "agent_orchestrator_timeout_s", 0),
     )

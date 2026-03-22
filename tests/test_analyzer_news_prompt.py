@@ -15,6 +15,45 @@ from src.analyzer import GeminiAnalyzer
 
 
 class AnalyzerNewsPromptTestCase(unittest.TestCase):
+    def test_analysis_prompt_resolves_shared_skill_prompt_state_by_default(self) -> None:
+        with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
+            analyzer = GeminiAnalyzer()
+
+        fake_state = SimpleNamespace(
+            skill_instructions="### 技能 1: 波段低吸\n- 关注支撑确认",
+            default_skill_policy="",
+        )
+        with patch("src.agent.factory.resolve_skill_prompt_state", return_value=fake_state):
+            prompt = analyzer._get_analysis_system_prompt("zh", stock_code="600519")
+
+        self.assertIn("### 技能 1: 波段低吸", prompt)
+        self.assertNotIn("专注于趋势交易", prompt)
+
+    def test_analysis_prompt_uses_injected_skill_sections_instead_of_hardcoded_trend_baseline(self) -> None:
+        with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
+            analyzer = GeminiAnalyzer(
+                skill_instructions="### 技能 1: 缠论\n- 关注中枢与背驰",
+                default_skill_policy="",
+            )
+
+        prompt = analyzer._get_analysis_system_prompt("zh", stock_code="600519")
+
+        self.assertIn("### 技能 1: 缠论", prompt)
+        self.assertNotIn("专注于趋势交易", prompt)
+        self.assertNotIn("多头排列：MA5 > MA10 > MA20", prompt)
+
+    def test_analysis_prompt_keeps_injected_default_policy_for_implicit_default_run(self) -> None:
+        with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
+            analyzer = GeminiAnalyzer(
+                skill_instructions="### 技能 1: 默认多头趋势",
+                default_skill_policy="## 默认技能基线（必须严格遵守）\n- **多头排列必须条件**：MA5 > MA10 > MA20",
+            )
+
+        prompt = analyzer._get_analysis_system_prompt("zh", stock_code="600519")
+
+        self.assertIn("### 技能 1: 默认多头趋势", prompt)
+        self.assertIn("多头排列必须条件", prompt)
+
     def test_prompt_contains_time_constraints(self) -> None:
         with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
             analyzer = GeminiAnalyzer()
