@@ -583,13 +583,15 @@ class SerpAPISearchProvider(BaseSearchProvider):
 
             for rank, item in enumerate(organic_results[:max_results]):
                 link = item.get('link', '')
-                snippet = self._build_organic_snippet(item)
+                rich_extensions = self._extract_rich_snippet_extensions(item)
+                snippet = self._build_organic_snippet(item, rich_extensions=rich_extensions)
 
                 if self._should_fetch_organic_content(
                     link=link,
                     snippet=snippet,
                     rank=rank,
                     fetched_count=organic_content_fetch_attempts,
+                    has_structured_summary=bool(rich_extensions),
                 ):
                     organic_content_fetch_attempts += 1
                     try:
@@ -660,13 +662,66 @@ class SerpAPISearchProvider(BaseSearchProvider):
                 seen.add(value)
                 extensions.append(value)
 
+            for raw_value in cls._flatten_rich_snippet_values(
+                section_data.get("detected_extensions")
+            ):
+                if raw_value in seen:
+                    continue
+                seen.add(raw_value)
+                extensions.append(raw_value)
+
         return extensions
 
     @classmethod
-    def _build_organic_snippet(cls, item: Dict[str, Any]) -> str:
+    def _flatten_rich_snippet_values(
+        cls,
+        value: Any,
+        *,
+        label: Optional[str] = None,
+    ) -> List[str]:
+        """把 rich_snippet.detected_extensions 展平为可读文本。"""
+        if isinstance(value, dict):
+            flattened: List[str] = []
+            for key, nested_value in value.items():
+                flattened.extend(
+                    cls._flatten_rich_snippet_values(
+                        nested_value,
+                        label=cls._normalize_organic_text(str(key)).replace("_", " "),
+                    )
+                )
+            return flattened
+
+        if isinstance(value, (list, tuple, set)):
+            flattened: List[str] = []
+            for nested_value in value:
+                flattened.extend(
+                    cls._flatten_rich_snippet_values(
+                        nested_value,
+                        label=label,
+                    )
+                )
+            return flattened
+
+        text = cls._normalize_organic_text(value)
+        if not text:
+            return []
+
+        if label:
+            return [f"{label}: {text}"]
+
+        return [text]
+
+    @classmethod
+    def _build_organic_snippet(
+        cls,
+        item: Dict[str, Any],
+        *,
+        rich_extensions: Optional[List[str]] = None,
+    ) -> str:
         """构建 organic result 摘要，尽量先消费 SerpAPI 已返回的信息。"""
         snippet = cls._normalize_organic_text(item.get("snippet", ""))
-        rich_extensions = cls._extract_rich_snippet_extensions(item)
+        if rich_extensions is None:
+            rich_extensions = cls._extract_rich_snippet_extensions(item)
 
         if rich_extensions:
             rich_text = " | ".join(rich_extensions)
@@ -683,12 +738,16 @@ class SerpAPISearchProvider(BaseSearchProvider):
         snippet: str,
         rank: int,
         fetched_count: int,
+        has_structured_summary: bool,
     ) -> bool:
         """仅对极少量高位且摘要明显不足的结果补抓正文。"""
         if fetched_count >= cls._ORGANIC_CONTENT_FETCH_LIMIT:
             return False
 
         if rank >= cls._ORGANIC_CONTENT_FETCH_RANK_LIMIT:
+            return False
+
+        if has_structured_summary:
             return False
 
         if len(snippet) >= cls._ORGANIC_SNIPPET_SUFFICIENT_LENGTH:

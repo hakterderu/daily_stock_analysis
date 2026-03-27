@@ -109,6 +109,44 @@ class TestSerpAPISearchProvider(unittest.TestCase):
         self.assertIn("Brokerages lift target prices", resp.results[0].snippet)
         mock_fetch.assert_not_called()
 
+    def test_provider_uses_detected_rich_snippet_fields_without_fetching(self) -> None:
+        provider = SerpAPISearchProvider(["dummy_key"])
+
+        with self._patch_serpapi(
+            {
+                "organic_results": [
+                    {
+                        "title": "Detected extensions result",
+                        "link": "https://example.com/detected-extensions",
+                        "source": "Example",
+                        "rich_snippet": {
+                            "top": {
+                                "detected_extensions": {
+                                    "price": "$125.30",
+                                    "updated_at": "1 hour ago",
+                                }
+                            },
+                            "bottom": {
+                                "detected_extensions": {
+                                    "rating": 4.5,
+                                    "votes": 1200,
+                                }
+                            },
+                        },
+                    }
+                ]
+            }
+        ), patch("src.search_service.fetch_url_content") as mock_fetch:
+            resp = provider.search("阿里巴巴 财报", max_results=3)
+
+        self.assertTrue(resp.success)
+        self.assertEqual(len(resp.results), 1)
+        self.assertIn("price: $125.30", resp.results[0].snippet)
+        self.assertIn("updated at: 1 hour ago", resp.results[0].snippet)
+        self.assertIn("rating: 4.5", resp.results[0].snippet)
+        self.assertIn("votes: 1200", resp.results[0].snippet)
+        mock_fetch.assert_not_called()
+
     def test_provider_fetches_only_one_top_short_snippet_candidate(self) -> None:
         provider = SerpAPISearchProvider(["dummy_key"])
 
@@ -149,6 +187,48 @@ class TestSerpAPISearchProvider(unittest.TestCase):
         )
         self.assertIn("【网页详情】", resp.results[0].snippet)
         self.assertEqual(resp.results[1].snippet, "也很短")
+        self.assertEqual(resp.results[2].snippet, "还是很短")
+
+    def test_provider_skips_asset_link_and_fetches_next_eligible_result(self) -> None:
+        provider = SerpAPISearchProvider(["dummy_key"])
+
+        with self._patch_serpapi(
+            {
+                "organic_results": [
+                    {
+                        "title": "PDF attachment",
+                        "link": "https://example.com/report.PDF?download=1",
+                        "snippet": "附件摘要很短",
+                        "source": "Example",
+                    },
+                    {
+                        "title": "HTML article",
+                        "link": "https://example.com/article",
+                        "snippet": "正文摘要也短",
+                        "source": "Example",
+                    },
+                    {
+                        "title": "Third short result",
+                        "link": "https://example.com/third-short",
+                        "snippet": "还是很短",
+                        "source": "Example",
+                    },
+                ]
+            }
+        ), patch(
+            "src.search_service.fetch_url_content",
+            return_value="网页正文补充信息 " * 40,
+        ) as mock_fetch:
+            resp = provider.search("阿里巴巴 财报", max_results=3)
+
+        self.assertTrue(resp.success)
+        self.assertEqual(len(resp.results), 3)
+        mock_fetch.assert_called_once_with(
+            "https://example.com/article",
+            timeout=SerpAPISearchProvider._ORGANIC_CONTENT_FETCH_TIMEOUT,
+        )
+        self.assertEqual(resp.results[0].snippet, "附件摘要很短")
+        self.assertIn("【网页详情】", resp.results[1].snippet)
         self.assertEqual(resp.results[2].snippet, "还是很短")
 
     def test_provider_fetch_failure_stays_fail_open_and_stops_after_budget(self) -> None:
