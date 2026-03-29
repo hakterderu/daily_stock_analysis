@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 🔎 **SerpAPI 正文补抓范围收敛** — 自然搜索结果不再逐条同步抓取网页正文；现在仅对极少数高位且摘要明显不足的结果，在更短超时预算内做延迟补抓，并优先复用 SerpAPI 已返回的结构化摘要，降低搜索链路尾延迟与慢站点放大风险。
 - [修复] A 股和中文股票名称场景下的相关资讯搜索恢复中文优先策略：`search_stock_news()` 现在会在首个 provider 主要返回英文资讯时继续尝试后续引擎，并将同批结果中的中文资讯排到前面；同时非美股查询不再默认沿用 Brave 的 `en/US` 区域语言偏好，避免更新后被英文新闻结果占满。
 - [修复] 飞书群机器人通知现在支持 `FEISHU_WEBHOOK_SECRET` / `FEISHU_WEBHOOK_KEYWORD`，并在 Web 设置与文档中明确区分 Webhook 推送和 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 应用模式，降低误配导致的推送失败。
+- [修复] SQLite 主写入链路现在对 `stock_daily(code,date)` 使用批量原子 upsert，并在文件型 SQLite 连接上默认启用 `WAL`、`busy_timeout` 与有限写入重试，降低批量分析和并发回写场景下的锁竞争与吞吐抖动。
 
 ## [3.11.0] - 2026-03-27
 
