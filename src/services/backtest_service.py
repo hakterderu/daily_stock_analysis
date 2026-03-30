@@ -250,17 +250,12 @@ class BacktestService:
     ) -> Optional[Dict[str, Any]]:
         config = get_config()
         engine_version = str(getattr(config, "backtest_engine_version", "v1"))
-        resolved_eval_window_days = (
-            int(eval_window_days)
-            if eval_window_days is not None
-            else int(getattr(config, "backtest_eval_window_days", 10))
-        )
         lookup_code = OVERALL_SENTINEL_CODE if scope == "overall" else code
 
         if analysis_date_from is not None or analysis_date_to is not None:
             rows = self.repo.list_results(
                 code=code,
-                eval_window_days=resolved_eval_window_days,
+                eval_window_days=int(eval_window_days) if eval_window_days is not None else None,
                 engine_version=engine_version,
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
@@ -274,7 +269,7 @@ class BacktestService:
                 rows=rows,
                 scope=scope,
                 code=lookup_code,
-                eval_window_days=resolved_eval_window_days,
+                eval_window_days=int(eval_window_days) if eval_window_days is not None else None,
                 engine_version=engine_version,
             )
 

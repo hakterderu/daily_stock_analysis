@@ -390,21 +390,42 @@ class BacktestServiceTestCase(unittest.TestCase):
         self.assertEqual(len(evaluations["items"]), 1)
         self.assertEqual(evaluations["items"][0]["engine_version"], "v1")
 
-        summary = service.get_summary(
+        # Without explicit eval_window_days, summary infers the smallest
+        # window from matched rows (window=1 in this dataset) instead of
+        # falling back to the config default.
+        summary_inferred = service.get_summary(
             scope="stock",
             code="600519",
             analysis_date_from=date(2024, 1, 1),
             analysis_date_to=date(2024, 1, 1),
         )
-        self.assertIsNotNone(summary)
-        assert summary is not None
-        self.assertEqual(summary["eval_window_days"], 3)
-        self.assertEqual(summary["engine_version"], "v1")
-        self.assertEqual(summary["total_evaluations"], 1)
-        self.assertEqual(summary["completed_count"], 1)
-        self.assertEqual(summary["win_count"], 1)
-        self.assertEqual(summary["loss_count"], 0)
-        self.assertAlmostEqual(summary["direction_accuracy_pct"], 100.0)
+        self.assertIsNotNone(summary_inferred)
+        assert summary_inferred is not None
+        self.assertEqual(summary_inferred["eval_window_days"], 1)
+        self.assertEqual(summary_inferred["engine_version"], "v1")
+        self.assertEqual(summary_inferred["total_evaluations"], 1)
+        self.assertEqual(summary_inferred["completed_count"], 1)
+        self.assertEqual(summary_inferred["win_count"], 0)
+        self.assertEqual(summary_inferred["loss_count"], 1)
+        self.assertAlmostEqual(summary_inferred["direction_accuracy_pct"], 0.0)
+
+        # With explicit eval_window_days=3, summary filters to that window only.
+        summary_explicit = service.get_summary(
+            scope="stock",
+            code="600519",
+            eval_window_days=3,
+            analysis_date_from=date(2024, 1, 1),
+            analysis_date_to=date(2024, 1, 1),
+        )
+        self.assertIsNotNone(summary_explicit)
+        assert summary_explicit is not None
+        self.assertEqual(summary_explicit["eval_window_days"], 3)
+        self.assertEqual(summary_explicit["engine_version"], "v1")
+        self.assertEqual(summary_explicit["total_evaluations"], 1)
+        self.assertEqual(summary_explicit["completed_count"], 1)
+        self.assertEqual(summary_explicit["win_count"], 1)
+        self.assertEqual(summary_explicit["loss_count"], 0)
+        self.assertAlmostEqual(summary_explicit["direction_accuracy_pct"], 100.0)
 
     def test_get_summary_date_range_rejects_excessive_row_counts(self) -> None:
         service = BacktestService(self.db)
