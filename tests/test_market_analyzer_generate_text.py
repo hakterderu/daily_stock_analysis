@@ -511,6 +511,36 @@ Sector text.
         assert "Leaders: **AI算力**(+3.25%)" in result
         assert "Laggards: **煤炭**(-1.12%)" in result
 
+    def test_us_english_indices_do_not_label_turnover_as_cny(self):
+        from src.core.market_profile import US_PROFILE
+        from src.core.market_strategy import get_market_strategy_blueprint
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        ma.config.report_language = "en"
+        ma.region = "us"
+        ma.profile = US_PROFILE
+        ma.strategy = get_market_strategy_blueprint("us")
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[
+                MarketIndex(
+                    code="SPX",
+                    name="S&P 500",
+                    current=5200.0,
+                    change=35.0,
+                    change_pct=0.68,
+                    amount=9876543210.0,
+                )
+            ],
+        )
+
+        result = ma._build_indices_block(overview)
+
+        assert "CNY 100m" not in result
+        assert "Turnover (USD bn)" in result
+        assert "| S&P 500 | 5200.00 |" in result
+
     def test_no_private_attribute_access_in_market_analyzer_source(self):
         """Static guard: market_analyzer.py must not access private analyzer attrs."""
         import ast

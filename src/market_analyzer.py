@@ -146,6 +146,22 @@ class MarketAnalyzer:
             return "A-share market"
         return "A股市场"
 
+    def _get_turnover_unit_label(self) -> str:
+        """Return the turnover unit label for the current market/language."""
+        if self.region == "us":
+            return "USD bn" if self._get_review_language() == "en" else "十亿美元"
+        return "CNY 100m" if self._get_review_language() == "en" else "亿"
+
+    def _format_turnover_value(self, amount_raw: float) -> str:
+        """Format raw turnover according to market-specific units."""
+        if amount_raw == 0.0:
+            return "N/A"
+        if self.region == "us":
+            return f"{amount_raw / 1e9:.2f}"
+        if amount_raw > 1e6:
+            return f"{amount_raw / 1e8:.0f}"
+        return f"{amount_raw:.0f}"
+
     def _get_review_title(self, date: str) -> str:
         if self._get_review_language() == "en":
             market_name = "US Market Recap" if self.region == "us" else "A-share Market Recap"
@@ -477,7 +493,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 f"> 📈 Advancers **{overview.up_count}** / Decliners **{overview.down_count}** / "
                 f"Flat **{overview.flat_count}** | "
                 f"Limit-up **{overview.limit_up_count}** / Limit-down **{overview.limit_down_count}** | "
-                f"Turnover **{overview.total_amount:.0f}** (CNY 100m)"
+                f"Turnover **{overview.total_amount:.0f}** ({self._get_turnover_unit_label()})"
             )
         lines = [
             f"> 📈 上涨 **{overview.up_count}** 家 / 下跌 **{overview.down_count}** 家 / "
@@ -493,8 +509,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return ""
         if self._get_review_language() == "en":
             lines = [
-                "| Index | Last | Change % | Turnover (CNY 100m) |",
-                "|-------|------|----------|--------------------|",
+                f"| Index | Last | Change % | Turnover ({self._get_turnover_unit_label()}) |",
+                "|-------|------|----------|-----------------|",
             ]
         else:
             lines = [
@@ -504,13 +520,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         for idx in overview.indices:
             arrow = "🔴" if idx.change_pct < 0 else "🟢" if idx.change_pct > 0 else "⚪"
             amount_raw = idx.amount or 0.0
-            if amount_raw == 0.0:
-                # Yahoo Finance 不提供成交额，显示 N/A 避免误解
-                amount_str = "N/A"
-            elif amount_raw > 1e6:
-                amount_str = f"{amount_raw / 1e8:.0f}"
-            else:
-                amount_str = f"{amount_raw:.0f}"
+            amount_str = self._format_turnover_value(amount_raw)
             lines.append(f"| {idx.name} | {idx.current:.2f} | {arrow} {idx.change_pct:+.2f}% | {amount_str} |")
         return "\n".join(lines)
 
@@ -571,7 +581,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 stats_block = f"""## Market Breadth
 - Advancers: {overview.up_count} | Decliners: {overview.down_count} | Flat: {overview.flat_count}
 - Limit-up: {overview.limit_up_count} | Limit-down: {overview.limit_down_count}
-- Turnover: {overview.total_amount:.0f} (CNY 100m)"""
+- Turnover: {overview.total_amount:.0f} ({self._get_turnover_unit_label()})"""
             else:
                 stats_block = "## Market Breadth\n(No equivalent advance/decline statistics are available for this market.)"
 
@@ -789,7 +799,7 @@ Output the report content directly, no extra commentary.
 | Decliners | {overview.down_count} |
 | Limit-up | {overview.limit_up_count} |
 | Limit-down | {overview.limit_down_count} |
-| Turnover (CNY 100m) | {overview.total_amount:.0f} |
+| Turnover ({self._get_turnover_unit_label()}) | {overview.total_amount:.0f} |
 """
             sector_section = ""
             if self.profile.has_sector_rankings and (top_text or bottom_text):
