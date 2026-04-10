@@ -42,6 +42,7 @@ from src.agent.protocols import (
 )
 from src.agent.runner import parse_dashboard_json
 from src.agent.tools.registry import ToolRegistry
+from src.config import AGENT_MAX_STEPS_DEFAULT
 from src.report_language import normalize_report_language
 
 if TYPE_CHECKING:
@@ -83,7 +84,7 @@ class AgentOrchestrator:
         llm_adapter: LLMToolAdapter,
         skill_instructions: str = "",
         technical_skill_policy: str = "",
-        max_steps: int = 10,
+        max_steps: int = AGENT_MAX_STEPS_DEFAULT,
         mode: str = "standard",
         skill_manager=None,
         config=None,
@@ -197,13 +198,11 @@ class AgentOrchestrator:
         )
 
 
-    # Default global max_steps from config (AGENT_MAX_STEPS).
-    _DEFAULT_GLOBAL_MAX_STEPS = 10
-
     def _prepare_agent(self, agent: Any) -> Any:
         """Apply orchestrator-level runtime settings to a child agent.
 
-        When the orchestrator-level ``max_steps`` equals the default (10),
+        When the orchestrator-level ``max_steps`` equals the default
+        (``AGENT_MAX_STEPS_DEFAULT``),
         each agent keeps its own per-agent limit — this prevents inflating
         a decision agent (designed for 3 steps) to 10 steps.
 
@@ -215,7 +214,7 @@ class AgentOrchestrator:
         the agent is capped at the global value.
         """
         if hasattr(agent, "max_steps"):
-            if self.max_steps > self._DEFAULT_GLOBAL_MAX_STEPS:
+            if self.max_steps > AGENT_MAX_STEPS_DEFAULT:
                 # User explicitly raised the limit — apply to all agents.
                 agent.max_steps = self.max_steps
             else:

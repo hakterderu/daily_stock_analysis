@@ -35,6 +35,7 @@ from src.agent.protocols import (
     StageResult,
     StageStatus,
 )
+from src.config import AGENT_MAX_STEPS_DEFAULT
 
 
 # ============================================================
@@ -500,13 +501,9 @@ class TestOrchestratorModes(unittest.TestCase):
         self.assertEqual(orch.mode, "standard")
 
     def test_chain_agents_inherit_orchestrator_max_steps(self):
-        """Orchestrator max_steps acts as a *ceiling*, not a hard override.
-
-        Each agent keeps ``min(own_default, orchestrator_limit)`` so that
-        specialised agents with lower defaults are not inflated.
-        """
+        """Default/lowered limits cap agents; raised limits hard-override all agents."""
         orch = self._make_orchestrator("full")
-        orch.max_steps = 9
+        orch.max_steps = AGENT_MAX_STEPS_DEFAULT
         high_limit_chain = orch._build_agent_chain(AgentContext(query="test", stock_code="600519"))
         self.assertEqual(
             {agent.agent_name: agent.max_steps for agent in high_limit_chain},
@@ -518,6 +515,13 @@ class TestOrchestratorModes(unittest.TestCase):
         self.assertEqual(
             {agent.agent_name: agent.max_steps for agent in low_limit_chain},
             {"technical": 5, "intel": 4, "risk": 4, "decision": 3},
+        )
+
+        orch.max_steps = AGENT_MAX_STEPS_DEFAULT + 2
+        raised_limit_chain = orch._build_agent_chain(AgentContext(query="test", stock_code="600519"))
+        self.assertEqual(
+            {agent.agent_name: agent.max_steps for agent in raised_limit_chain},
+            {"technical": AGENT_MAX_STEPS_DEFAULT + 2, "intel": AGENT_MAX_STEPS_DEFAULT + 2, "risk": AGENT_MAX_STEPS_DEFAULT + 2, "decision": AGENT_MAX_STEPS_DEFAULT + 2},
         )
 
     def test_build_context_from_dict(self):
