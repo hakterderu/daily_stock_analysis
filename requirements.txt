@@ -28,6 +28,9 @@ pandas-datareader==0.10.0
 
 # Technical analysis
 ta==0.11.0
+# Note: ta-lib requires manual C library installation before pip install
+# On Ubuntu: sudo apt-get install libta-lib-dev
+# On Mac: brew install ta-lib
 ta-lib==0.4.28
 
 # Testing
